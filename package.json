@@ -5,9 +5,17 @@
   "description": "PriceCatcher forecasting and analysis research",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
+  "workspaces": [
+    "explorer"
+  ],
   "scripts": {
-    "download:pricecatcher": "node scripts/download-pricecatcher.mjs"
+    "download:pricecatcher": "node scripts/download-pricecatcher.mjs",
+    "build:cube": "node scripts/build-cube.mjs",
+    "explorer": "node scripts/explorer.mjs"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.4.5-r.1"
   }
 }
