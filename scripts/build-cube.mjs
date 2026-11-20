@@ -11,6 +11,7 @@
  *                 n_premises         premises that reported the item in the period
  *                 n_obs              raw price observations behind the row
  *   items.json    item metadata (name, unit, group, category, coverage) + build info
+ *   metrics.json  per-item forecastability metrics (see scripts/lib/item-metrics.mjs)
  *
  * Aggregation is two-step: each premise is first collapsed to one mean price
  * per period, then the median is taken across premises, so a shop that
@@ -18,7 +19,8 @@
  *
  * Usage:
  *   node scripts/build-cube.mjs              # rebuild
- *   node scripts/build-cube.mjs --if-stale   # rebuild only if raw data is newer than the cube
+ *   node scripts/build-cube.mjs --if-stale   # rebuild only if raw data is newer than the outputs
+ *   node scripts/build-cube.mjs --metrics-only  # recompute metrics.json from the existing cube
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -26,13 +28,20 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
+import { buildItemMetrics } from "./lib/item-metrics.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RAW_DIR = join(ROOT, "datasets", "pricecatcher");
 const OUT_DIR = join(ROOT, "datasets", "derived");
 const CUBE = join(OUT_DIR, "cube.parquet");
 const ITEMS = join(OUT_DIR, "items.json");
+const METRICS = join(OUT_DIR, "metrics.json");
 const NATIONAL = "Malaysia";
+const STATES = [
+  "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan", "Pahang", "Perak", "Perlis",
+  "Pulau Pinang", "Sabah", "Sarawak", "Selangor", "Terengganu",
+  "W.P. Kuala Lumpur", "W.P. Labuan", "W.P. Putrajaya",
+];
 
 /** SQL string literal (paths are ours, but quote defensively). */
 const lit = (s) => `'${s.replaceAll("'", "''")}'`;
@@ -45,13 +54,17 @@ function rawFiles() {
 }
 
 function isStale() {
-  if (!existsSync(CUBE) || !existsSync(ITEMS)) return true;
-  const built = Math.min(statSync(CUBE).mtimeMs, statSync(ITEMS).mtimeMs);
-  return rawFiles().some((f) => statSync(f).mtimeMs > built);
+  const outputs = [CUBE, ITEMS, METRICS];
+  if (outputs.some((f) => !existsSync(f))) return true;
+  const built = Math.min(...outputs.map((f) => statSync(f).mtimeMs));
+  // Metrics code changing also invalidates metrics.json.
+  const inputs = [...rawFiles(), join(ROOT, "scripts", "lib", "item-metrics.mjs")];
+  return inputs.some((f) => statSync(f).mtimeMs > built);
 }
 
 async function main() {
   const ifStale = process.argv.includes("--if-stale");
+  const metricsOnly = process.argv.includes("--metrics-only");
   const monthly = rawFiles().filter((f) => /pricecatcher_\d{4}-\d{2}\.parquet$/.test(f));
   const lookupItem = join(RAW_DIR, "lookup_item.parquet");
   const lookupPremise = join(RAW_DIR, "lookup_premise.parquet");
@@ -70,10 +83,24 @@ async function main() {
 
   await mkdir(OUT_DIR, { recursive: true });
   const started = Date.now();
-  console.log(`Building cube from ${monthly.length} monthly files…`);
-
   const db = await DuckDBInstance.create(":memory:");
   const con = await db.connect();
+
+  // Only the metrics are missing/outdated and the cube exists: skip the slow part.
+  const cubeFresh =
+    existsSync(CUBE) && existsSync(ITEMS) &&
+    !rawFiles().some((f) => statSync(f).mtimeMs > Math.min(statSync(CUBE).mtimeMs, statSync(ITEMS).mtimeMs));
+  if (metricsOnly || (ifStale && cubeFresh)) {
+    if (!existsSync(CUBE)) {
+      console.error("No cube yet — run without --metrics-only first.");
+      process.exit(1);
+    }
+    await writeMetrics(con, started);
+    con.closeSync();
+    return;
+  }
+
+  console.log(`Building cube from ${monthly.length} monthly files…`);
 
   const tmpCube = `${CUBE}.part`;
   await con.run(`
@@ -153,12 +180,18 @@ async function main() {
     ),
   );
   await rename(tmpItems, ITEMS);
-  con.closeSync();
 
   const mb = (statSync(CUBE).size / 1024 / 1024).toFixed(1);
   console.log(
-    `Done in ${((Date.now() - started) / 1000).toFixed(1)}s: ${CUBE} (${mb} MB), ${items.length} items, data through ${lastDay}`,
+    `Cube built in ${((Date.now() - started) / 1000).toFixed(1)}s: ${CUBE} (${mb} MB), ${items.length} items, data through ${lastDay}`,
   );
+  await writeMetrics(con, Date.now());
+  con.closeSync();
+}
+
+async function writeMetrics(con, started) {
+  const n = await buildItemMetrics(con, { cubePath: CUBE, outPath: METRICS, national: NATIONAL, states: STATES });
+  console.log(`Metrics for ${n} items in ${((Date.now() - started) / 1000).toFixed(1)}s: ${METRICS}`);
 }
 
 main().catch(async (err) => {

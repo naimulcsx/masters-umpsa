@@ -1,5 +1,5 @@
 import { Explorer, type InitialView, type RangeKey, type Tab } from "@/components/Explorer";
-import { loadItems } from "@/lib/data";
+import { loadItems, loadMetrics } from "@/lib/data";
 import { DEFAULT_STATES, FRESH_GROUP, MAX_COMPARE, STATES, type Grain } from "@/lib/shared";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,7 @@ type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function Page({ searchParams }: { searchParams: Promise<Search> }) {
-  const meta = await loadItems();
+  const [meta, metricsFile] = await Promise.all([loadItems(), loadMetrics()]);
   if (!meta) {
     return (
       <main className="empty">
@@ -49,5 +49,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     range: pick<RangeKey>(one(sp.range), ["all", "pre", "post", "24m", "12m"], "all"),
   };
 
-  return <Explorer meta={meta} initial={initial} />;
+  // The item header only needs the scalar metrics, not the sparklines.
+  const metrics = metricsFile
+    ? { lastWeek: metricsFile.lastWeek, items: metricsFile.items.map(({ spark: _spark, ...m }) => m) }
+    : null;
+
+  return <Explorer meta={meta} initial={initial} metrics={metrics} />;
 }

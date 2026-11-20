@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { FRESH_GROUP, addMonths, fmtMonth, itemLabel, type Item } from "@/lib/shared";
 
@@ -49,6 +50,9 @@ export function ItemList({ items, selected, onSelect, dataEndWeek }: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
+        <Link href="/candidates" className="nav-link">
+          Forecasting candidates →
+        </Link>
         <div className="seg" role="tablist" aria-label="Item scope">
           <button role="tab" aria-selected={scope === "fresh"} onClick={() => setScope("fresh")}>
             Fresh produce <span className="muted">{freshCount}</span>

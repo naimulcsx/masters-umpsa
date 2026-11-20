@@ -2,12 +2,14 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import type { MetricsFile } from "./candidates";
 import type { ItemsFile, SeriesResponse, SeriesRow } from "./shared";
 
 export const DERIVED_DIR =
   process.env.PRICECATCHER_DERIVED ?? path.resolve(process.cwd(), "..", "datasets", "derived");
 const CUBE = path.join(DERIVED_DIR, "cube.parquet");
 const ITEMS = path.join(DERIVED_DIR, "items.json");
+const METRICS = path.join(DERIVED_DIR, "metrics.json");
 
 // One DuckDB connection per server process; kept on globalThis so dev-mode
 // hot reloads don't open a new database on every edit.
@@ -32,6 +34,14 @@ function connection(): Promise<DuckDBConnection> {
 export async function loadItems(): Promise<ItemsFile | null> {
   try {
     return JSON.parse(await readFile(ITEMS, "utf8")) as ItemsFile;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadMetrics(): Promise<MetricsFile | null> {
+  try {
+    return JSON.parse(await readFile(METRICS, "utf8")) as MetricsFile;
   } catch {
     return null;
   }

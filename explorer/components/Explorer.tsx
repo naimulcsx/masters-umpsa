@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BREAK_PERIOD,
+  FRESH_GROUP,
   MAX_COMPARE,
   SPARSE_STATES,
   STATES,
@@ -17,7 +18,10 @@ import {
   type SeriesResponse,
   type SeriesRow,
 } from "@/lib/shared";
+import { DEFAULT_THRESHOLDS, evaluateAll, type ItemMetrics } from "@/lib/candidates";
 import { useChartTheme } from "@/lib/theme";
+import Link from "next/link";
+import { statusColor } from "./CandidateScatter";
 import { DataTable } from "./DataTable";
 import { ItemList } from "./ItemList";
 import { StateHeatmap } from "./StateHeatmap";
@@ -55,7 +59,15 @@ function withSlots(states: string[]): Selection {
   return states.slice(0, MAX_COMPARE).map((state, slot) => ({ state, slot }));
 }
 
-export function Explorer({ meta, initial }: { meta: ItemsFile; initial: InitialView }) {
+export function Explorer({
+  meta,
+  initial,
+  metrics,
+}: {
+  meta: ItemsFile;
+  initial: InitialView;
+  metrics: { lastWeek: string; items: ItemMetrics[] } | null;
+}) {
   const theme = useChartTheme();
   const national = meta.national;
 
@@ -74,6 +86,19 @@ export function Explorer({ meta, initial }: { meta: ItemsFile; initial: InitialV
   const cache = useRef(new Map<number, SeriesResponse>());
 
   const item = meta.items.find((i) => i.item_code === itemCode);
+
+  // Forecasting readiness under the default candidate thresholds. Evaluated
+  // within the item's own scope (fresh produce vs all) so the top-N ranking
+  // matches the Candidates page.
+  const readiness = useMemo(() => {
+    if (!metrics) return null;
+    const m = metrics.items.find((x) => x.item_code === itemCode);
+    if (!m) return null;
+    const fresh = item?.item_group === FRESH_GROUP;
+    const groupOf = new Map(meta.items.map((i) => [i.item_code, i.item_group]));
+    const scoped = metrics.items.filter((x) => !fresh || groupOf.get(x.item_code) === FRESH_GROUP);
+    return { m, e: evaluateAll(scoped, DEFAULT_THRESHOLDS, metrics.lastWeek).get(itemCode)!, fresh };
+  }, [metrics, itemCode, item, meta.items]);
 
   // Fetch the item's series (weekly + monthly, all states) — cached per item.
   useEffect(() => {
@@ -191,6 +216,29 @@ export function Explorer({ meta, initial }: { meta: ItemsFile; initial: InitialV
                 {item.unit} · {item.item_group ?? "no group"} › {item.item_category ?? "no category"} · #{item.item_code}{" "}
                 · {fmtMonth(item.first_period)} – {fmtMonth(item.last_period)} · {fmtCount(item.n_obs)} price
                 observations
+              </p>
+            )}
+            {readiness && (
+              <p className="readiness">
+                <span className="status">
+                  <i className="sw-dot" style={{ background: statusColor(readiness.e.status, theme) }} />
+                  {readiness.e.status === "headline"
+                    ? `Top ${DEFAULT_THRESHOLDS.topN} volatile forecasting candidate`
+                    : readiness.e.status === "candidate"
+                      ? "Forecasting candidate"
+                      : `Not a forecasting candidate: ${readiness.e.reasons.join("; ")}`}
+                </span>
+                <span className="muted">
+                  {readiness.e.denseStates}/16 dense states · moves in{" "}
+                  {Math.round((readiness.m.change_rate ?? 0) * 100)}% of weeks
+                  {readiness.m.weekly_vol != null && ` · ${(readiness.m.weekly_vol * 100).toFixed(1)}%/wk volatility`}
+                  {readiness.m.seasonal_strength != null &&
+                    ` · seasonality ${readiness.m.seasonal_strength.toFixed(2)}`}
+                  {readiness.e.breakFlag &&
+                    readiness.m.break_shift != null &&
+                    ` · ⚑ ${fmtPct(readiness.m.break_shift)} shift at Jul 2025`}
+                </span>
+                <Link href={readiness.fresh ? "/candidates" : "/candidates?scope=all"}>All candidates →</Link>
               </p>
             )}
           </div>
