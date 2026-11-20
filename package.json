@@ -1,0 +1,13 @@
+{
+  "name": "masters-umpsa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PriceCatcher forecasting and analysis research",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "download:pricecatcher": "node scripts/download-pricecatcher.mjs"
+  }
+}
